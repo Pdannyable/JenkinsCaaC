@@ -1,0 +1,103 @@
+---
+vars:
+  jenkins_data: /var/lib/jenkins
+  jenkins_config_dir: /etc/jenkins
+  casc_jenkins_config: /etc/jenkins/jcasc_config
+  jenkins_log_dir: /var/log/jenkins
+  jenkins_create_data_dir: True
+  jenkins_docker_image: jenkinsimage:latest
+  jenkins_min_mem: 
+  jenkins_max_mem: 
+  jenkins_port:
+    http: 8080
+    tunnel: 50000
+  casc_config_repo:
+  jenkins_username:
+  jenkins_password: 
+  
+  jenkins_config_java_options: >-
+    -Djava.awt.headless=true -Djenkins.install.runSetupWizard=false
+    -Dorg.jenkinsci.plugins.pipeline.modeldefinition.parser.RuntimeASTTransformer.SCRIPT_SPLITTING_TRANSFORMATION=true
+    -Dorg.jenkinsci.plugins.pipeline.modeldefinition.parser.RuntimeASTTransformer.SCRIPT_SPLITTING_ALLOW_LOCAL_VARIABLES=true
+    -Dmail.smtp.starttls.enable='true' -Dhudson.slaves.WorkspaceList=_
+    -Dhudson.security.csrf.DefaultCrumbIssuer.EXCLUDE_SESSION_ID='true'
+    -Dhudson.model.ParametersAction.keepUndefinedParameters=true
+    -Djava.net.preferIPv4Stack=true
+    -Dorg.apache.commons.jelly.tags.fmt.timeZone=America/Chicago
+    -Duser.timezone=America/Chicago
+    -server
+    -XX:+AlwaysPreTouch
+    -Xms{{ jenkins_min_mem }}
+    -Xmx{{ jenkins_max_mem }}
+    -XX:+UseG1GC
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+ParallelRefProcEnabled -XX:+UseStringDeduplication
+    -XX:+UnlockExperimentalVMOptions
+    -XX:G1NewSizePercent=20
+    -XX:+UnlockDiagnosticVMOptions
+    -XX:G1SummarizeRSetStatsPeriod=1
+    -Xlog:gc:file=/var/jenkins_home/logs/gc.log 
+    -Xlog:gc*
+    -Xlog:gc+heap=trace
+  jenkins_config_options: >-
+    --sessionTimeout=1440
+    --sessionEviction=43200
+
+# Grab the casc configuration from github repo and place in playbook directory 
+- name: Clone Jenkins Security Configuration
+  delegate_to: localhost
+  become: false
+  git:
+    repo: "{{ casc_config_repo }}"
+    dest: "{{ playbook_dir }}/templates/casc"
+    version: main
+    force: yes
+    accept_hostkey: true
+
+# Create needed configuration directory on EC2 instances
+- name: Create jenkins data/config directory
+  file:
+    dest: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ jenkins_data }}"
+    - "{{ jenkins_config_dir }}"
+    - "{{ casc_jenkins_config }}"
+    - "{{ jenkins_log_dir }}"
+  when:
+    - jenkins_create_data_dir | bool
+
+# Copy the CASC config to the EC2 instance 
+- name: Copy jcasc config
+  template:
+    src: "{{ item }}"
+    dest: "/etc/jenkins/jcasc_config/{{ item | basename | regex_replace('\\.j2','') }}"
+    mode: 0644
+  with_fileglob:
+    - ../templates/casc/*.j2
+
+
+# Mount volumes, expose ports and run conatiner image 
+- name: Run Container with ingress
+  docker_container:
+    name: "jenkins_server_app"
+    image: "{{ jenkins_docker_image }}"
+    pull: yes
+    hostname: "CIServer"
+    published_ports:
+      - "{{ jenkins_port.http }}:{{ jenkins_port.http}}"
+      - "{{ jenkins_port.tunnel }}:{{ jenkins_port.tunnel }}"
+    volumes:
+      - "{{ jenkins_config_dir }}:{{ jenkins_config_dir }}"
+      - "{{ jenkins_data }}:/var/jenkins_home"
+    network_mode: bridge
+    log_driver: json-file
+    log_options:
+      tag: '{% raw %} "{{.Name}}" {% endraw %}'
+    env:
+      CASC_JENKINS_CONFIG: "{{ casc_jenkins_config }}"
+      JAVA_OPTS: "{{ jenkins_config_java_options }}"
+      JENKINS_OPTS: "{{ jenkins_config_options }}"
+    restart: yes
+    state: started
+  register: container_result
