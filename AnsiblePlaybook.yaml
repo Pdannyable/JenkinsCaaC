@@ -6,14 +6,14 @@ vars:
   jenkins_log_dir: /var/log/jenkins
   jenkins_create_data_dir: True
   jenkins_docker_image: jenkinsimage:latest
-  jenkins_min_mem: 
-  jenkins_max_mem: 
+  jenkins_min_mem: 256 MB
+  jenkins_max_mem: 4 GB
   jenkins_port:
     http: 8080
     tunnel: 50000
-  casc_config_repo:
-  jenkins_username:
-  jenkins_password: 
+  casc_config_repo: https://github.com/Pdannyable/JenkinsCaaC.git
+  jenkins_username: admin
+  jenkins_password: /var/lib/jenkins/secrets/initialAdminPassword
   
   jenkins_config_java_options: >-
     -Djava.awt.headless=true -Djenkins.install.runSetupWizard=false
@@ -43,7 +43,7 @@ vars:
     --sessionTimeout=1440
     --sessionEviction=43200
 
-# Grab the casc configuration from github repo and place in playbook directory 
+# Grab the casc configuration from gitHub repo and place in playbook directory
 - name: Clone Jenkins Security Configuration
   delegate_to: localhost
   become: false
@@ -77,7 +77,7 @@ vars:
     - ../templates/casc/*.j2
 
 
-# Mount volumes, expose ports and run conatiner image 
+# Mount volumes, expose ports and run container image
 - name: Run Container with ingress
   docker_container:
     name: "jenkins_server_app"
